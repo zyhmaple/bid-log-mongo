@@ -17,7 +17,6 @@ import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.adrich.bidlog.consume.KafkaCosumeObject;
 import com.adrich.bidlog.extract.BidLogExtract;
 import com.adrich.bidlog.model.BuildLogModel;
 import com.adrich.bidlog.mongodb.MongoDBBatchCURD;
@@ -36,6 +35,7 @@ public class logProductor {
 	private SimpleDateFormat dateFormat = new SimpleDateFormat("yyy-MM-dd HH:mm:ss");
 	private static String logFilePath;
 	private static int startIndex,endIndex;
+
 	
 	private static final String ISO8859 = "ISO-8859-1";
 	private static final String UTF8 = "utf-8";
@@ -55,6 +55,8 @@ public class logProductor {
 			logFilePath = p.getProperty("logrw.filepath");
 			startIndex = Integer.parseInt(p.getProperty("logrw.startIndex"));
 			endIndex = Integer.parseInt(p.getProperty("logrw.endIndex"));
+			
+
 		} catch (IOException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
@@ -121,6 +123,7 @@ public class logProductor {
 		}, 0, 10, TimeUnit.SECONDS);
 
 	}
+
 
 	public void productLog(final List<File> fileList) throws Exception {
 

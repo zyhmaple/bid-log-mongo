@@ -52,17 +52,18 @@ public class MongoBlockQueuePool {
 				MongoBlockQueuePool.initQueueByBidLogType(logName);
 			return COLLECTION_MQ_MAP.get(logName);
 		}
+		
 		public static Map<String, BlockingQueue<Document>> getAllQueues(){
 			return COLLECTION_MQ_MAP;
 		}
+		
 		public static int getProcessThreadCountByBidLogType(String logName){
 			if(COLLECTION_THREAD_COUNT.containsKey(logName))
 				return	COLLECTION_THREAD_COUNT.get(logName);
 			else{
 				 COLLECTION_THREAD_COUNT.put(logName,0);
 				 return 0;
-				}
-				
+			}
 		}
 		
 		public static void increateProcessThreadCountByBidLogType(String logName){
