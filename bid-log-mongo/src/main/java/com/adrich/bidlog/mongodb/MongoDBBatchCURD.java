@@ -83,15 +83,6 @@ public enum MongoDBBatchCURD {
 	public static int threadSleep = 1000;
 	public static int startIndex = 0;
 
-	/*
-	 * // 批量插入我们要求线程间排队 private volatile static CountDownLatch winSignal = new
-	 * CountDownLatch(threadCountInSameTime / 4); private volatile static
-	 * CountDownLatch clickSignal = new CountDownLatch(threadCountInSameTime /
-	 * 4); private volatile static CountDownLatch exposSignal = new
-	 * CountDownLatch(threadCountInSameTime / 4); private volatile static
-	 * CountDownLatch summarySignal = new CountDownLatch( threadCountInSameTime
-	 * - (threadCountInSameTime / 4) * 3);
-	 */
 	/**
 	 * MongoDB错误代码：主键重复
 	 */
@@ -155,30 +146,12 @@ public enum MongoDBBatchCURD {
 			COLLECTION_MAP = new ConcurrentHashMap<String, MongoCollection<Document>>();
 
 			MongoIterable<String> collectionNames = DATABASE.listCollectionNames();
-			/*
-			 * COLLECTION_MQ_MAP = new ConcurrentHashMap<String,
-			 * BlockingQueue<Document>>(); for (String collectionName :
-			 * collectionNames) { MongoCollection<Document> collection =
-			 * DATABASE.getCollection(collectionName);
-			 * COLLECTION_MAP.put(collectionName, collection);
-			 * 
-			 * }
-			 */
+
 			for (String collectionName : collectionNames) {
 				MongoCollection<Document> collection = DATABASE.getCollection(collectionName);
 
 				COLLECTION_MAP.put(collectionName, collection);
 			}
-			/*
-			 * // 四个阻塞队列 // 竞价，点击，曝光做批量插入
-			 * COLLECTION_MQ_MAP.put(LogConstants.MONGODB_WIN, Win_Queue);
-			 * COLLECTION_MQ_MAP.put(LogConstants.MONGODB_CLICK, Click_Queue);
-			 * COLLECTION_MQ_MAP.put(LogConstants.MONGODB_EXPOS, Expos_Queue);
-			 * // 汇总队列，队列做事前汇总，做批量 [单个upsert]，对upsert文档字段需求，做set和setOnInsert区分
-			 * COLLECTION_MQ_MAP.put(LogConstants.MONGODB_SUMMARY,
-			 * Summary_Queue); //竞价做list归并
-			 * COLLECTION_MQ_MAP.put(LogConstants.MONGODB_BID, Bid_Queue);
-			 */
 
 			ExecutorService service = Executors.newCachedThreadPool(); // 缓存线程池
 
@@ -523,50 +496,6 @@ public enum MongoDBBatchCURD {
 		}
 	}
 
-	/**
-	 * 插入log_summary
-	 * 
-	 * @param doc
-	 * @param countType
-	 * @author zyh
-	 */
-	private static void insertSummary(Document doc, String countType) {
-
-		String requestID = doc.getString("requestID");
-		int timeInt = doc.getInteger("log_time");
-		String sspCode = doc.getString("sspCode");
-		String orderID = doc.getString("orderID");
-		String planID = doc.getString("planID");
-
-		Document document = new Document();
-		Document setOnInsert = new Document();
-		Document set = new Document();
-
-		setOnInsert.put("requestTimeID", requestID);
-		setOnInsert.put("sspCode", sspCode);
-		setOnInsert.put("orderID", orderID);
-		setOnInsert.put("planID", planID);
-		setOnInsert.put("log_time", timeInt);
-		setOnInsert.put("log_timehour", timeInt / 100);
-		setOnInsert.put("wincount", 0);
-		setOnInsert.put("exposcount", 0);
-		setOnInsert.put("clickcount", 0);
-		setOnInsert.remove(countType);
-
-		if ("exposcount".equals(countType)) {
-			setOnInsert.remove("log_time");
-			setOnInsert.remove("log_timehour");
-			set.put("log_time", timeInt);
-			set.put("log_timehour", timeInt / 100);
-		}
-		set.put(countType, 1);
-
-		document.put("$filter", "requestTimeID");
-		document.put("$onInsert", setOnInsert);
-		document.put("$set", set);
-
-		upsertMany(LogConstants.MONGODB_SUMMARY, document);
-	}
 
 	/**
 	 * 插入log_summary
@@ -575,7 +504,7 @@ public enum MongoDBBatchCURD {
 	 * @param countType
 	 * @author zyh
 	 */
-	private static void insertSummary2(Document doc, String countType) {
+	private static void insertLogSummary(Document doc, String countType) {
 
 		Map<String, Object> upfieldList = new HashMap<String, Object>(12);
 
@@ -620,34 +549,37 @@ public enum MongoDBBatchCURD {
 		if (kfJson == null)
 			return;
 
-		int size = kfJson.toString().getBytes().length;
-
 		String scid_dmpcode = kfJson.getString("scid_dmpcode");
 		String sspcode = kfJson.getString("sspcode");
 		String dmp_code = kfJson.getString("dmp_code");
 		long updatetime = 0;
 
-		// 构建占位json
-		JSONObject insertObject = new JSONObject();
-		insertObject.put("scid_dmpcode", scid_dmpcode);
-		insertObject.put("sspcode", sspcode);
-		insertObject.put("dmp_code", dmp_code);
-		insertObject.put("updatetime", updatetime);
-		byte[] tempPlaceHolder = new byte[placeHolder_ByteCount - insertObject.toString().getBytes().length];
-		Map<String, Object> upfieldDefaultList = new LinkedHashMap<String, Object>(12);
-		// 部分如果一次插入，不再修改字段，可以直接用真值插入
-		upfieldDefaultList.put("scid_dmpcode", new UpdateField(Operator.setOnInsert, "scid_dmpcode", scid_dmpcode));
-		upfieldDefaultList.put("sspCode", new UpdateField(Operator.setOnInsert, "sspcode", sspcode));
-		upfieldDefaultList.put("dmp_code", new UpdateField(Operator.setOnInsert, "dmp_code", dmp_code));
-		// 必须有
-		upfieldDefaultList.put("updatetime", new UpdateField(Operator.setOnInsert, "updatetime", updatetime));
+		boolean placeHolderBL = false;
+		if (placeHolderBL) {
+			// 构建占位json
+			JSONObject insertObject = new JSONObject();
+			insertObject.put("scid_dmpcode", scid_dmpcode);
+			insertObject.put("sspcode", sspcode);
+			insertObject.put("dmp_code", dmp_code);
+			insertObject.put("updatetime", updatetime);
+			byte[] tempPlaceHolder = new byte[placeHolder_ByteCount - insertObject.toString().getBytes().length];
+			Map<String, Object> upfieldDefaultList = new LinkedHashMap<String, Object>(12);
+			// 部分如果一次插入，不再修改字段，可以直接用真值插入
+			upfieldDefaultList.put("scid_dmpcode", new UpdateField(Operator.setOnInsert, "scid_dmpcode", scid_dmpcode));
+			upfieldDefaultList.put("sspCode", new UpdateField(Operator.setOnInsert, "sspcode", sspcode));
+			upfieldDefaultList.put("dmp_code", new UpdateField(Operator.setOnInsert, "dmp_code", dmp_code));
+			// 必须有
+			upfieldDefaultList.put("updatetime", new UpdateField(Operator.setOnInsert, "updatetime", updatetime));
 
-		upfieldDefaultList.put(placeHolder_Key,
-				new UpdateField(Operator.setOnInsert, placeHolder_Key, tempPlaceHolder));
-		upfieldDefaultList.put("$filter", Filters.eq("scid_dmpcode", scid_dmpcode));
-		// 插入默认值，占位
-		//upsertArrayMany(LogConstants.MONGODB_BIDUSER, new Document(upfieldDefaultList));
-
+			upfieldDefaultList.put(placeHolder_Key,
+					new UpdateField(Operator.setOnInsert, placeHolder_Key, tempPlaceHolder));
+			upfieldDefaultList.put("$filter", Filters.eq("scid_dmpcode", scid_dmpcode));
+			// 插入默认值，占位
+			upsertMany(LogConstants.MONGODB_BIDUSER, new Document(upfieldDefaultList));
+		}
+		
+		//Log 更新 归并
+		
 		Map<String, Object> upfieldSetList = new LinkedHashMap<String, Object>(25);
 		// 对非空进行修改赋值
 		for (Entry<String, Object> entry : kfJson.entrySet()) {
@@ -693,26 +625,34 @@ public enum MongoDBBatchCURD {
 		// 清空 占位 数组
 		upfieldSetList.put(placeHolder_Key, new UpdateField(Operator.unset, placeHolder_Key, 1));
 
-		upsertArrayMany(LogConstants.MONGODB_BIDUSER, new Document(upfieldSetList));
+		upsertMany(LogConstants.MONGODB_BIDUSER, new Document(upfieldSetList));
 	}
 
+	/*
+	 * 不需要进行频繁更新的字段；一般是一些设备、媒体等固定的信息
+	 */
 	public static boolean isNotNeedUpdateForBid(String str) {
 		Set<String> fields = new HashSet<String>();
 		fields.add("scid_dmpcode");
 		fields.add("sspcode");
 		fields.add("dmp_code");
+		fields.add("isApp");
 		if (fields.contains(str))
 			return true;
 		else
 			return false;
 	}
 
+	/*
+	 * 需要采取数组保存的字段
+	 */
 	public static boolean isNeedSaveAsListField(String str){
 		
 		Set<String> fields = new HashSet<String>();
 		fields.add("ips");
 		fields.add("city");
 		fields.add("userattributelist");
+		fields.add("userattrnamelist");
 		if (fields.contains(str))
 			return true;
 		else
@@ -729,41 +669,6 @@ public enum MongoDBBatchCURD {
 			return ((List<?>) req).size() == 0;
 		return false;
 
-	}
-
-	/**
-	 * 监视线程
-	 * 
-	 * @author zyh
-	 *
-	 */
-	static class Worker implements Runnable {
-		private final CountDownLatch startSignal;
-		private final CountDownLatch doneSignal;
-
-		Worker(CountDownLatch startSignal, CountDownLatch doneSignal) {
-			this.startSignal = startSignal;
-			this.doneSignal = doneSignal;
-		}
-
-		public void run() {
-			try {
-				startSignal.await();
-				doWork();
-				doneSignal.countDown();
-			} catch (InterruptedException ex) {
-			} // return;
-		}
-
-		void doWork() {
-			String rid = "abc123ddfassadf";
-			Document document = new Document();
-			document.put("_id", rid);
-			document.put("requestID", rid);
-			String collectionName = "log_summary";
-			updateOneByAndEqualsUpsert(collectionName, document, document);
-
-		}
 	}
 
 	/**
@@ -802,19 +707,59 @@ public enum MongoDBBatchCURD {
 		insertMany(collectionName, document);
 	}
 
-	/**
-	 * 批量更新数组文档
-	 * 
-	 * @param collectionName
-	 * @param document
-	 * @author zyh
-	 */
-	public static void upsertArrayMany(String collectionName, Document document) {
-		insertMany(collectionName, document);
-	}
+
+	
+
 
 	/**
+	 * 监视队列，负责检索所有日志处理线程
+	 * @author zyh
+	 *
+	 */
+	static class QueueWatcher implements Runnable {
+
+		private final ExecutorService service;
+
+		QueueWatcher(ExecutorService service) {
+			this.service = service;
+		}
+
+		public void run() {
+			while (true) {
+				doWork();
+				try {
+					Thread.sleep(1000);
+				} catch (InterruptedException e) {
+					e.printStackTrace();
+				}
+			}
+		}
+
+		void doWork() {
+			if (!MongoBlockQueuePool.getAllQueues().isEmpty())
+				// 循环创建处理线程；条件队列长度大于5000且 同类线程数 不超过线程平均数
+				for (String key : MongoBlockQueuePool.getAllQueues().keySet()) {
+					// 队列大于一倍以上批处理量
+					int _count = MongoBlockQueuePool.getProcessThreadCountByBidLogType(key);
+					int _queueCount = MongoBlockQueuePool.countOfNotEmptyQueueCountInSameTime();
+					if (MongoBlockQueuePool.getQueueByBidLogType(key).size() / batchProcessReqCount >= 1
+							// 线程分配数不得大于n分之一总线程数
+							&& (_count < avgThreadCountOfQueue
+									// 汇总数据线程数 可额外分配平分后空余线程
+									|| (LogConstants.MONGODB_SUMMARY.equals(key) && _count < (threadCountInSameTime
+											- (avgThreadCountOfQueue * _queueCount))))) {
+
+						this.service.execute(new BatchWorker(key));
+						System.out.println("Queue[" + key + "] insert is Start!");
+					}
+				}
+		}
+	}
+	
+	/**
 	 * 批处理工作线程
+	 * @author zyh
+	 *
 	 */
 	static class BatchWorker implements Runnable {
 		private String collectionName;
@@ -822,7 +767,6 @@ public enum MongoDBBatchCURD {
 		private List<Document> batchList = null;
 		private Map<String, Document> summaryMap = null;
 		private long sumCount;
-		private Class documentClass;
 
 		BatchWorker(String collectionName) {
 			this.collectionName = collectionName;
@@ -898,7 +842,19 @@ public enum MongoDBBatchCURD {
 							try {
 								collection.updateOne(filter, buildUpdate2(summary), upsert.upsert(true));
 							} catch (Exception e) {
-								throw e;
+								if (e instanceof MongoWriteException) {
+									String message = e.getMessage();
+									if (message == null) {
+										message = "";
+									}
+									if (message.startsWith("E11000")) {
+										System.out.println("E11000,主键重复，no problem");
+									} else {
+										e.printStackTrace();
+									}
+								} else {
+									e.printStackTrace();
+								}
 							}
 						}
 					}
@@ -941,21 +897,32 @@ public enum MongoDBBatchCURD {
 	// SUMMMARY 需要汇总
 	// 情况1：单个字段覆盖
 	// 情况2：数组 要归并
-
 	private static Document UnionSummary(Document doc1, Document doc2) {
 		// doc1 新插入的；doc2已经整合的
 		if (doc2 == null)
 			return doc1;
 
+		UpdateField userattributelist = (UpdateField)doc2.get("userattributelist");
+		
+/*		if(userattributelist!=null){
+			UpdateField id = (UpdateField)doc2.get("scid_dmpcode");
+			System.out.println("Union \"scid_dmpcode\":\""+id.value+"\"");
+			System.out.println("\"userattributelist\":\""+userattributelist.value+"\"");
+		}*/
+
+		
 		// 将doc1 整合到doc2
 		for (Object obj : doc1.values()) {
+			
 			if (obj instanceof Bson) {
+				
 				doc2.put("$filter", doc1.get("$filter"));
+				
 			} else if (obj instanceof UpdateField) {
+				
 				UpdateField field = (UpdateField) obj;
-				if (isUnionOperator(field.operator)) {
-					// UpdateField newSet = (UpdateField)
-					// doc1.get(field.fieldName);
+				//if (isUnionOperator(field.operator)) {
+					
 					if (Operator.set.equals(field.operator))
 						doc2.put(field.fieldName, obj);
 					else if (Operator.addEachToSet.equals(field.operator)) {
@@ -970,12 +937,13 @@ public enum MongoDBBatchCURD {
 						}
 					}
 
-				}
+				//}
 			}
 		}
 		return doc2;
 	}
 
+	//List 去重
 	private static List addToSetForSummary(List arrList){
 		
 		Set<String> addToSet = new HashSet<String>(arrList);
@@ -984,6 +952,7 @@ public enum MongoDBBatchCURD {
 		
 		return result;
 	}
+	
 	/**
 	 * 需要合并的操作
 	 * 
@@ -993,71 +962,18 @@ public enum MongoDBBatchCURD {
 	public static boolean isUnionOperator(Operator opr) {
 		switch (opr) {
 		case set:
-			;
-			// case addToSet:;
+		case addToSet:;
 		case addEachToSet:
 			return true;
 		default:
 			return false;
 		}
 	}
-
-	static class QueueWatcher implements Runnable {
-
-		private final ExecutorService service;
-
-		QueueWatcher(ExecutorService service) {
-			this.service = service;
-		}
-
-		public void run() {
-			while (true) {
-				doWork();
-				try {
-					Thread.sleep(1000);
-				} catch (InterruptedException e) {
-					e.printStackTrace();
-				}
-			}
-		}
-
-		void doWork() {
-			if (!MongoBlockQueuePool.getAllQueues().isEmpty())
-				// 循环创建处理线程；条件队列长度大于5000且 同类线程数 不超过线程平均数
-				for (String key : MongoBlockQueuePool.getAllQueues().keySet()) {
-					// 队列大于一倍以上批处理量
-					int _count = MongoBlockQueuePool.getProcessThreadCountByBidLogType(key);
-					int _queueCount = MongoBlockQueuePool.countOfNotEmptyQueueCountInSameTime();
-					if (MongoBlockQueuePool.getQueueByBidLogType(key).size() / batchProcessReqCount >= 1
-							// 线程分配数不得大于n分之一总线程数
-							&& (_count < avgThreadCountOfQueue
-									// 汇总数据线程数 可额外分配平分后空余线程
-									|| (LogConstants.MONGODB_SUMMARY.equals(key) && _count < (threadCountInSameTime
-											- (avgThreadCountOfQueue * _queueCount))))) {
-
-						this.service.execute(new BatchWorker(key));
-						System.out.println("Queue[" + key + "] insert is Start!");
-					}
-				}
-		}
-
-		/*
-		 * boolean await() { try { clickSignal.await(); exposSignal.await();
-		 * summarySignal.await(); winSignal.await(); return false; } catch
-		 * (InterruptedException e) { e.printStackTrace(); } return true; }
-		 */
-
-	}
-
-	/*
-	 * static CountDownLatch getCountDownLatch(String key) { switch (key) { case
-	 * LogConstants.MONGODB_WIN: return winSignal; case
-	 * LogConstants.MONGODB_CLICK: return clickSignal; case
-	 * LogConstants.MONGODB_EXPOS: return exposSignal; case
-	 * LogConstants.MONGODB_SUMMARY: return summarySignal; default: return null;
-	 * } }
+	/**
+	 * 操作域
+	 * @author zyh
+	 *
 	 */
-
 	public static class UpdateField {
 		public static enum Operator {
 			set, setOnInsert, addEachToSet, unset, addToSet, pull
@@ -1100,6 +1016,11 @@ public enum MongoDBBatchCURD {
 
 	}
 
+	/**
+	 * 获取第一个过滤条件 KV对象
+	 * @param FilterStr
+	 * @return
+	 */
 	public static MyEntry<String, Object> getFiltersFirst(String FilterStr) {
 
 		String pattern1 = "(fieldName=)[^\\}]*";
@@ -1117,6 +1038,13 @@ public enum MongoDBBatchCURD {
 
 	}
 
+	/**
+	 * 获取所有过滤条件的对象List
+	 * @author zyh
+	 *
+	 * @param <K>
+	 * @param <V>
+	 */
 	final static class MyEntry<K, V> implements Map.Entry<K, V> {
 		private final K key;
 		private V value;
@@ -1144,10 +1072,15 @@ public enum MongoDBBatchCURD {
 		}
 	}
 
+	/**
+	 * 测试
+	 * @param args
+	 * @throws Throwable
+	 */
 	public static void main(String[] args) throws Throwable {
 
 		boolean start = false;
-		if (start) {
+		if (start) {//批量更新
 			int reqCount = startIndex + 1000000;
 
 			try {
@@ -1162,9 +1095,9 @@ public enum MongoDBBatchCURD {
 					insertMany(LogConstants.MONGODB_EXPOS, dt);
 					insertMany(LogConstants.MONGODB_CLICK, dt);
 
-					insertSummary2(dt, "wincount");
-					insertSummary2(dt, "exposcount");
-					insertSummary2(dt, "clickcount");
+					insertLogSummary(dt, "wincount");
+					insertLogSummary(dt, "exposcount");
+					insertLogSummary(dt, "clickcount");
 
 					if (i % batchProcessReqCount == 0)
 						Thread.sleep(reqSleep);
@@ -1172,16 +1105,8 @@ public enum MongoDBBatchCURD {
 				System.out.println("[" + new Date(System.currentTimeMillis()) + "] AllReq spend Time:"
 						+ (System.currentTimeMillis() - begin));
 
-				/*
-				 * getCountDownLatch(LogConstants.MONGODB_CLICK).await();
-				 * getCountDownLatch(LogConstants.MONGODB_EXPOS).await();
-				 * getCountDownLatch(LogConstants.MONGODB_WIN).await();
-				 * 
-				 * getCountDownLatch(LogConstants.MONGODB_SUMMARY).await();
-				 */
 				System.out.println("[" + new Date(System.currentTimeMillis()) + "] All spend Time:"
 						+ (System.currentTimeMillis() - begin));
-				// insertOne(collectionName, document);
 
 			} catch (Exception e) {
 				if (e instanceof MongoWriteException) {
@@ -1200,36 +1125,7 @@ public enum MongoDBBatchCURD {
 			}
 		} else {
 
-			/*
-			 * Document dt = new Document(); BuildLogModel sjm = new
-			 * BuildLogModel(); for (int i = 0; i < 10000; i++) { for
-			 * (JSONObject json : KafkaCosumeObject.logConsumeObject) {
-			 * BidLogExtract.extractInfo(json, sjm); } if (i % 1000 == 0)
-			 * System.out.println("has increate " + i); } // dt.putAll((new
-			 * InsertObject("Bid")).getLogDeviceDt()); for (JSONObject json :
-			 * sjm.getSspList()) { insertSet(json); } for (JSONObject json :
-			 * sjm.getDspList()) { insertSet(json); }
-			 */
-			/*
-			 * MongoCollection<Document> collection =
-			 * getCollection(LogConstants.MONGODB_BIDUSER);
-			 * 
-			 * BlockingQueue<Document> queue =
-			 * MongoBlockQueuePool.getQueueByBidLogType(LogConstants.
-			 * MONGODB_BIDUSER); int size = queue.size(); for(int
-			 * i=0;i<size;i++){ Document doc = queue.take();
-			 * 
-			 * Bson filter = null; for(Entry<String, Object> entry:
-			 * doc.entrySet()) { if(entry.getKey().startsWith("$filter")) { Bson
-			 * tempFilter = (Bson) entry.getValue(); if(filter==null) filter =
-			 * tempFilter; else filter = Filters.and(filter,tempFilter); }
-			 * 
-			 * } UpdateOptions uo = new UpdateOptions(); uo.upsert(true);
-			 * UpdateResult updateResult = collection.updateOne(filter,
-			 * buildUpdate2(doc), uo); String end ="";
-			 * 
-			 * }
-			 */
+			//读日志批量跟新
 			logProductor.productStart();
 		}
 

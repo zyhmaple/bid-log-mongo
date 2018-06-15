@@ -1,5 +1,9 @@
 package com.adrich.bidlog.extract.build;
 
+import java.io.File;
+import java.io.IOException;
+import java.io.RandomAccessFile;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -44,7 +48,33 @@ public class BuildUserSsp {
 	public static final String OS_WINPHONE_NUMBER = "3";
 	private static final String IDFA_NULL_1 = "(NULL)";
 	private static final String IDFA_NULL_2 = "NULL";
+	private static JSONObject tagJson = null;
+	
+	static{
+		try {
+			readTagMappingFile(new File("D:/mongodbTest/logs/tagName.txt"));
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+	}
+	
+	
+	public static void readTagMappingFile(File file) throws IOException{
+		
+		// 指定文件可读可写
+		RandomAccessFile randomFile = new RandomAccessFile(file, "r");
 
+		String tmp = "";
+
+		StringBuilder jsonStr = new StringBuilder();
+		while ((tmp = randomFile.readLine()) != null) {
+			jsonStr.append(new String(tmp.getBytes("ISO-8859-1"),"utf-8"));
+		}
+
+		tagJson = JSONObject.parseObject(jsonStr.toString());
+
+	}
 	@SuppressWarnings("unchecked")
 	public static JSONObject bulidJSONObject(JSONObject logJsonObjct,BuildLogModel sm,long currentTime,String isAppStr, boolean isApp) {
 
@@ -167,8 +197,24 @@ public class BuildUserSsp {
 
 	}
 	private static void buildJSONObjectMapForUserPart(List<String> userAttributeList, String ip, JSONObject map) {
-		map.put(IP_KEY, ip);
+		//map.put(IP_KEY, ip);
 		map.put(USER_ATTRIBUTE_LIST_KEY_ES, userAttributeList);
+		
+		if(tagJson!=null&&userAttributeList!=null&&userAttributeList.size()>0)
+		{
+			String dmpCode = map.getString(UserSspConstants.PROPERTY_DMP_CODE);
+			List<String> userAttrnameList = new ArrayList<String>();
+			for(String tagId:userAttributeList)
+			{
+				String key = dmpCode+"_"+tagId;
+				if(tagJson.containsKey(key))
+					userAttrnameList.add(tagJson.getString(key));
+				else
+					userAttrnameList.add(key);
+			}
+			
+			map.put(USER_ATTRIBUTE_LIST_NAME, userAttrnameList);
+		}
 		/**
 		 * 客户端过滤完，需要存储的时候，后面再加此属性
 		 * modify in 2017.12.22
