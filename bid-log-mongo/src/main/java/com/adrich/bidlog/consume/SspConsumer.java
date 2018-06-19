@@ -15,8 +15,6 @@ import org.slf4j.LoggerFactory;
 
 import com.adrich.bidlog.extract.BidLogExtract;
 import com.adrich.bidlog.model.BuildLogModel;
-import com.adrich.bidlog.mongodb.MongoDBBatchCURD;
-import com.alibaba.fastjson.JSONObject;
 
 
 /**
@@ -120,10 +118,7 @@ public enum SspConsumer {
 					}
 					currSize++;
 					try {
-						JSONObject logJsonObjct = JSONObject.parseObject(value);
-						MongoDBBatchCURD.insertSet(BidLogExtract.extractInfo(logJsonObjct));
-
-						//BidLogExtract.extractInfo(value, sjm);
+						BidLogExtract.extractInfo(value, sjm);
                         /**
                         *@TODO业务处理
                         */
